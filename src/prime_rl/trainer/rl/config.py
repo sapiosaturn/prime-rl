@@ -94,6 +94,13 @@ class MismatchPlotConfig(BaseConfig):
         bool, Field(description="Whether to periodically save trainer-vs-inference mismatch plots as PNGs.")
     ] = False
 
+    note: Annotated[
+        str | None,
+        Field(
+            description="Optional note to display above the plot (useful for tracking experimental changes).",
+        ),
+    ] = None
+
     interval: Annotated[
         int,
         Field(

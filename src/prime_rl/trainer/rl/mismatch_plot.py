@@ -39,6 +39,7 @@ def save_mismatch_plot(
     trainer_probs: Sequence[float],
     inference_probs: Sequence[float],
     out_path: Path,
+    note: str | None = None,
     step: int,
     max_points: int,
 ) -> float:
@@ -57,6 +58,8 @@ def save_mismatch_plot(
     import matplotlib.pyplot as plt
 
     fig, ax = plt.subplots(figsize=(6.5, 6.5), dpi=150)
+    if note:
+        fig.suptitle(note, fontsize=10)
     sc = ax.scatter(ip, tp, c=abs_diff, s=6, alpha=0.7)
     ax.plot([0.0, 1.0], [0.0, 1.0], "r--", linewidth=1.5, label="Perfect Precision (y=x)")
     ax.set_xlim(0.0, 1.0)
@@ -81,7 +84,10 @@ def save_mismatch_plot(
         bbox={"boxstyle": "round,pad=0.25", "facecolor": "white", "alpha": 0.85, "edgecolor": "0.7"},
     )
 
-    fig.tight_layout()
+    if note:
+        fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.96))
+    else:
+        fig.tight_layout()
     fig.savefig(out_path)
     plt.close(fig)
     return corr

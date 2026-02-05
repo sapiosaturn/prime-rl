@@ -473,6 +473,7 @@ def train(config: RLTrainerConfig):
                 trainer_probs=tensors["trainer_probs"][-1],
                 inference_probs=tensors["inference_probs"][-1],
                 out_path=plot_path,
+                note=config.mismatch_plot.note,
                 step=progress.step,
                 max_points=config.mismatch_plot.max_points,
             )

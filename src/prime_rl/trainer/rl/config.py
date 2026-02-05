@@ -87,6 +87,37 @@ class DataLoaderConfig(BaseConfig):
     fake: Annotated[FakeDataLoaderConfig | None, Field(description="Whether to use a fake data loader.")] = None
 
 
+class MismatchPlotConfig(BaseConfig):
+    """Configures trainer-vs-inference probability mismatch plots."""
+
+    enabled: Annotated[
+        bool, Field(description="Whether to periodically save trainer-vs-inference mismatch plots as PNGs.")
+    ] = False
+
+    interval: Annotated[
+        int,
+        Field(
+            ge=1,
+            description="Step interval at which to save mismatch plots.",
+        ),
+    ] = 100
+
+    max_points: Annotated[
+        int,
+        Field(
+            ge=1,
+            description="Maximum number of points to plot (randomly downsampled).",
+        ),
+    ] = 50000
+
+    dir: Annotated[
+        Path,
+        Field(
+            description="Directory (relative to output_dir) to save mismatch plots into.",
+        ),
+    ] = Path("plots/mismatch")
+
+
 class BaseWeightBroadcastConfig(BaseModel):
     """Configures the base weight broadcast."""
 
@@ -152,6 +183,8 @@ class RLTrainerConfig(BaseSettings):
 
     # The wandb configuration
     wandb: WandbConfig | None = None
+
+    mismatch_plot: MismatchPlotConfig = MismatchPlotConfig()
 
     output_dir: Annotated[
         Path,

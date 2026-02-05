@@ -458,6 +458,26 @@ def train(config: RLTrainerConfig):
         # Synchronize the tensor metrics across all steps and ranks
         tensor_stats = tensors.compute_stats()
 
+        if (
+            world.is_master
+            and config.mismatch_plot.enabled
+            and progress.step % config.mismatch_plot.interval == 0
+            and tensors.get("trainer_probs")
+            and tensors.get("inference_probs")
+        ):
+            from prime_rl.trainer.rl.mismatch_plot import save_mismatch_plot
+
+            plot_dir = config.output_dir / config.mismatch_plot.dir
+            plot_path = plot_dir / f"mismatch_step_{progress.step:08d}.png"
+            corr = save_mismatch_plot(
+                trainer_probs=tensors["trainer_probs"][-1],
+                inference_probs=tensors["inference_probs"][-1],
+                out_path=plot_path,
+                step=progress.step,
+                max_points=config.mismatch_plot.max_points,
+            )
+            logger.info(f"Saved mismatch plot to {plot_path} (pearson_r={corr:.6f})")
+
         # Compute step metrics
         num_local_tokens = seq_len * batch_size
         num_tokens = parallel_dims.world_mesh["dp"].size() * num_local_tokens

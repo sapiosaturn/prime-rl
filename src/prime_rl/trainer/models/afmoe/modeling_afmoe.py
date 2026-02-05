@@ -277,6 +277,7 @@ class AfmoePreTrainedModel(PreTrainedModelPrimeRL):
         "post_mlp_layernorm",
         "q_norm",
         "k_norm",
+        "router.gate",
         "norm",
     ]
     _supports_sdpa = True

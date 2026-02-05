@@ -194,7 +194,7 @@ class TokenChoiceTopKRouter(nn.Module):
         route_scale: float,
     ):
         super().__init__()
-        self.gate = nn.Linear(dim, num_experts, bias=False)
+        self.gate = nn.Linear(dim, num_experts, bias=False, dtype=torch.float32)
         self.num_experts = num_experts
         self.top_k = top_k
         self.score_func = score_func
@@ -220,7 +220,7 @@ class TokenChoiceTopKRouter(nn.Module):
                     Number of tokens assigned to each expert with shape ``(num_experts,)``.
         """
         # scores shape (bs*slen, num_experts)
-        scores = self.gate(x)
+        scores = F.linear(x.to(torch.float32), self.gate.weight)
 
         # By default, sigmoid or softmax is performed in float32 to avoid loss explosion
         if self.score_func == "sigmoid":

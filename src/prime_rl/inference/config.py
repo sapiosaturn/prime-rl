@@ -162,6 +162,13 @@ class InferenceConfig(BaseSettings):
         ),
     ] = None
 
+    enable_prefix_caching: Annotated[
+        bool | None,
+        Field(
+            description="Whether to enable prefix caching. Passed to vLLM as `--enable-prefix-caching`. If None, vLLM auto-detects based on model support.",
+        ),
+    ] = None
+
     gpu_memory_utilization: Annotated[
         float,
         Field(
@@ -243,6 +250,7 @@ class InferenceConfig(BaseSettings):
             "model.rope_scaling": "rope_scaling",
             "parallel.tp": "tensor_parallel_size",
             "parallel.dp": "data_parallel_size",
+            "enable_prefix_caching": "enable_prefix_caching",
             "enable_lora": "enable_lora",
             "max_loras": "max_loras",
             "max_cpu_loras": "max_cpu_loras",

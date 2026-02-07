@@ -183,6 +183,8 @@ class AfmoeFlashAttention(AfmoeAttentionBase):
 
     def __init__(self, config: AfmoeAttentionConfig, flash_attn_version: int = 4):
         super().__init__(config)
+        if flash_attn_version == 4 and torch.cuda.get_device_capability()[0] < 10:
+            raise RuntimeError("fa4 varlen backward for sliding window is currently broken on sm_90. note: revisit later")
         self._flash_attn_version = flash_attn_version
         self.func = self._funcs[flash_attn_version]
         self._flash_attn_call = self.func

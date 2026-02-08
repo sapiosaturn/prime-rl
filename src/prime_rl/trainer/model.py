@@ -79,6 +79,17 @@ def freeze_vision_encoder(model: nn.Module) -> None:
     logger.info(f"Froze {num_frozen} parameters in vision encoder")
 
 
+def freeze_router(model: nn.Module) -> None:
+    """Freeze MoE router/gate weights to stabilize routing during training."""
+    logger = get_logger()
+    num_frozen = 0
+    for name, param in model.named_parameters():
+        if "mlp.router" in name:
+            param.requires_grad = False
+            num_frozen += 1
+    logger.info(f"Froze {num_frozen} MoE router parameters")
+
+
 def is_tt_moe_model(model: nn.Module) -> bool:
     return hasattr(model.config, "num_experts") or hasattr(model.config, "n_routed_experts")
 
@@ -618,6 +629,9 @@ def setup_model(
     # Apply LoRA before FSDP setup
     if config.lora is not None:
         apply_lora_to_model(model, config.lora)
+
+    if config.freeze_router:
+        freeze_router(model)
 
     if parallel_dims.ep_enabled:
         apply_ep(model, parallel_dims)

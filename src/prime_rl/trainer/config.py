@@ -255,6 +255,13 @@ class ModelConfig(BaseConfig):
         ),
     ] = True
 
+    freeze_router: Annotated[
+        bool,
+        Field(
+            description="Whether to freeze MoE router/gate weights during training. Useful for stabilizing routing decisions.",
+        ),
+    ] = False
+
     lora: Annotated[
         LoRAConfig | None,
         Field(

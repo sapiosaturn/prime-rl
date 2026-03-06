@@ -84,6 +84,17 @@ class SFTDataConfig(BaseDataConfig):
 
     # Configuring
     loss_mask: LossMaskConfig = LossMaskConfig()
+    loss_mask_mode: Annotated[
+        Literal["incremental", "assistant_mask_auto"],
+        Field(
+            description=(
+                "How to build the SFT loss mask. "
+                "'incremental' uses repeated apply_chat_template calls for exact role masking. "
+                "'assistant_mask_auto' tries the tokenizer's one-pass assistant mask path for assistant-only loss "
+                "and falls back to incremental masking otherwise."
+            )
+        ),
+    ] = "incremental"
 
     @model_validator(mode="after")
     def validate_subsets_and_splits(self):

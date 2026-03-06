@@ -118,6 +118,7 @@ class SFTDataset(StatefulIterableDataset):
         seq_len: int = 128,
         non_dp_size: int = 1,
         loss_mask_config: LossMaskConfig = LossMaskConfig(),
+        loss_mask_mode: Literal["incremental", "assistant_mask_auto"] = "incremental",
         max_examples: int | None = None,
         max_epochs: int | None = None,
     ):
@@ -130,6 +131,7 @@ class SFTDataset(StatefulIterableDataset):
         self.seed = seed
         self.seq_len = seq_len
         self.loss_mask_config = loss_mask_config
+        self.loss_mask_mode = loss_mask_mode
         self.max_examples = max_examples
         self.max_epochs = max_epochs
 
@@ -195,19 +197,31 @@ class SFTDataset(StatefulIterableDataset):
 
             return [_strip_content(message) for message in messages]
 
+        def uses_assistant_generation_mask(loss_mask_config: LossMaskConfig) -> bool:
+            return (
+                not loss_mask_config.system
+                and not loss_mask_config.user
+                and loss_mask_config.assistant
+                and not loss_mask_config.tool
+            )
+
+        def sanitize_chat_template_kwargs(chat_template_kwargs: object) -> dict:
+            kwargs = dict(chat_template_kwargs or {})
+            kwargs.pop("tokenize", None)
+            kwargs.pop("return_dict", None)
+            kwargs.pop("return_assistant_tokens_mask", None)
+            kwargs.pop("return_tensors", None)
+            return kwargs
+
         # Deserialize tool call arguments from message list, if present - assumes OAI format
         # Reference: https://platform.openai.com/docs/guides/function-calling#handling-function-calls
         prompt = deserialize_tool_calls(example["prompt"])
         completion = deserialize_tool_calls(example["completion"])
 
-        # Strip content from all messages so that incremental tokenization works
-        # NOTE: This has the side effect that we do never train on leading or trailing whitespace
-        prompt = strip_content(prompt)
-        completion = strip_content(completion)
-
         # Parse available tools, if present - assumes OAI format
         # Reference: https://platform.openai.com/docs/guides/function-calling#function-tool-example
         tools = json.loads(example.get("tools") or "[]")
+        chat_template_kwargs = sanitize_chat_template_kwargs(example.get("chat_template_kwargs", {}))
 
         def should_mask(message: dict, loss_mask_config: LossMaskConfig) -> bool:
             assert "role" in message, "Message must have a role"
@@ -223,7 +237,7 @@ class SFTDataset(StatefulIterableDataset):
                 case _:
                     raise ValueError(f"Invalid message role: {message['role']}")
 
-        def build_loss_mask(prompt, completion, tokenizer, loss_mask_config: LossMaskConfig) -> list[bool]:
+        def build_loss_mask_incrementally(prompt, completion, tokenizer, loss_mask_config: LossMaskConfig) -> list[bool]:
             messages = prompt + completion
             loss_mask: list[bool] = []
             prev_ids, prev_len = [], 0
@@ -244,7 +258,7 @@ class SFTDataset(StatefulIterableDataset):
                         and messages[i + 1]["role"] == "assistant"
                     )
                     else False,
-                    **{**example.get("chat_template_kwargs", {}), "return_dict": False},
+                    **{**chat_template_kwargs, "return_dict": False},
                 )
                 assert prev_ids == cur_ids[:prev_len], (
                     f"Got mismatch in incremental tokenization with chat template at message {i}. Previous ids: {prev_ids} != {cur_ids[:prev_len]=}.\nDecoded prev_ids:\n{tokenizer.decode(prev_ids)}\nDecoded cur_ids:\n{tokenizer.decode(cur_ids[:prev_len])}"
@@ -254,18 +268,62 @@ class SFTDataset(StatefulIterableDataset):
 
             return loss_mask
 
-        # Build input_ids
-        input_ids = cast(
-            list[int],
-            self.tokenizer.apply_chat_template(
-                prompt + completion,
-                tools=tools,
-                **{**example.get("chat_template_kwargs", {}), "return_dict": False},
-            ),
-        )
+        def build_input_ids_and_loss_mask() -> tuple[list[int], list[bool]]:
+            if (
+                self.loss_mask_mode == "assistant_mask_auto"
+                and uses_assistant_generation_mask(self.loss_mask_config)
+                and getattr(self.tokenizer, "is_fast", False)
+            ):
+                try:
+                    tokenized = cast(
+                        dict[str, list[int]],
+                        self.tokenizer.apply_chat_template(
+                            prompt + completion,
+                            tools=tools,
+                            tokenize=True,
+                            return_dict=True,
+                            return_assistant_tokens_mask=True,
+                            **chat_template_kwargs,
+                        ),
+                    )
+                except Exception as exc:
+                    self.logger.warning(
+                        "Chat template assistant mask path failed "
+                        f"({exc!r}); falling back to incremental loss-mask construction."
+                    )
+                else:
+                    input_ids = cast(list[int], tokenized["input_ids"])
+                    assistant_masks = tokenized.get("assistant_masks")
+                    if assistant_masks is not None:
+                        loss_mask = [bool(mask) for mask in cast(list[int], assistant_masks)]
+                        if len(input_ids) == len(loss_mask) and any(loss_mask):
+                            return input_ids, loss_mask
+                    self.logger.warning(
+                        "Chat template assistant mask path returned an empty or mismatched mask; "
+                        "falling back to incremental loss-mask construction."
+                    )
 
-        # Build loss_mask
-        loss_mask = build_loss_mask(prompt, completion, self.tokenizer, self.loss_mask_config)
+            # Strip content from all messages so that incremental tokenization works.
+            stripped_prompt = strip_content(prompt)
+            stripped_completion = strip_content(completion)
+
+            input_ids = cast(
+                list[int],
+                self.tokenizer.apply_chat_template(
+                    stripped_prompt + stripped_completion,
+                    tools=tools,
+                    **{**chat_template_kwargs, "return_dict": False},
+                ),
+            )
+            loss_mask = build_loss_mask_incrementally(
+                stripped_prompt,
+                stripped_completion,
+                self.tokenizer,
+                self.loss_mask_config,
+            )
+            return input_ids, loss_mask
+
+        input_ids, loss_mask = build_input_ids_and_loss_mask()
 
         # If EOS token is not found, manually append it
         if not self.tokenizer.eos_token_id in input_ids:
@@ -588,6 +646,7 @@ def setup_dataset(tokenizer: PreTrainedTokenizer, config: DataConfig, non_dp_siz
             seed=config.seed,
             seq_len=config.seq_len,
             loss_mask_config=config.loss_mask,
+            loss_mask_mode=config.loss_mask_mode,
             non_dp_size=non_dp_size,
         )
     else:
